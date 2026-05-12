@@ -121,7 +121,7 @@ def is_playlist_url(url):
 async def run_downloader(url, settings, output_dir):
     """Run main.py to download and convert the YouTube video."""
     cmd = [
-        "python3", DOWNLOADER_SCRIPT,
+        sys.executable, DOWNLOADER_SCRIPT,
         url,
         "--method", "ytdlp",  # Use ytdlp method for reliability in bot context
         "--output", output_dir,
@@ -153,15 +153,16 @@ async def run_downloader(url, settings, output_dir):
 async def run_playlist_downloader(url, settings, output_dir):
     """Run main.py to download an entire YouTube playlist."""
     cmd = [
-        "python3", DOWNLOADER_SCRIPT,
+        sys.executable, DOWNLOADER_SCRIPT,
         url,
         "--playlist",
         "--method", "ytdlp",
         "--output", output_dir,
     ]
 
-    mode = settings["mode"]
-    if mode == "audio":
+    # Use _playlist_submode to determine audio vs video (set by cmd_playlist)
+    submode = settings.get("_playlist_submode", "video")
+    if submode == "audio":
         cmd.extend(["--audio-only", "--audio-format", settings["audio_format"],
                      "--audio-bitrate", settings["audio_bitrate"]])
     else:
@@ -310,10 +311,12 @@ async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set mode to playlist."""
     settings = get_user_settings(update.effective_user.id)
+    # Remember whether user wants audio or video before switching to playlist mode
+    settings["_playlist_submode"] = settings["mode"]  # saves "video" or "audio"
     settings["mode"] = "playlist"
-    mode_label = "audio" if settings.get("_playlist_submode") == "audio" else "video"
+    submode_label = "🎵 Audio" if settings["_playlist_submode"] == "audio" else "🎬 Video"
     await update.message.reply_text(
-        "📺 Mode set to <b>Playlist Download</b>\n\n"
+        f"📺 Mode set to <b>Playlist Download</b> ({submode_label})\n\n"
         "Send a YouTube playlist URL to download all videos.\n"
         "Each video will be sent individually.\n\n"
         "Tip: Use /audio before /playlist for audio-only downloads.",
@@ -459,23 +462,14 @@ async def send_file_to_user(update, file_path, settings, total_files=None, curre
         progress_text = f" ({current_index + 1}/{total_files})"
 
     with open(file_path, "rb") as f:
-        if settings["mode"] == "audio" or (settings["mode"] == "playlist" and False):
-            # For playlist, detect by extension
-            if file_path.lower().endswith((".m4a", ".mp3", ".flac", ".aac", ".ogg")):
-                await update.message.reply_audio(
-                    audio=f,
-                    filename=file_name,
-                    caption=f"🎵 {file_name}{progress_text}",
-                    timeout=600,
-                )
-            else:
-                await update.message.reply_video(
-                    video=f,
-                    filename=file_name,
-                    supports_streaming=True,
-                    caption=f"🎬 {file_name}{progress_text}",
-                    timeout=600,
-                )
+        # Detect file type by extension
+        if file_path.lower().endswith((".m4a", ".mp3", ".flac", ".aac", ".ogg")):
+            await update.message.reply_audio(
+                audio=f,
+                filename=file_name,
+                caption=f"🎵 {file_name}{progress_text}",
+                timeout=600,
+            )
         else:
             await update.message.reply_video(
                 video=f,
