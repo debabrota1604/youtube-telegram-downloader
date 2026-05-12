@@ -4,14 +4,27 @@ YouTube Video/Audio Downloader and Converter
 Uses ffmpeg to download from YouTube URLs and convert based on audio/video config.
 yt-dlp is used as a helper to extract stream URLs, then ffmpeg handles download + merge.
 
+Default behavior: downloads BOTH video (MP4/1080p/H.265) and audio (MP3/256k) as separate files.
+
 Usage:
     python main.py <youtube_url> [options]
 
 Examples:
+    # Default: downloads both video (mp4-1080p-H.265) and audio (mp3-256k)
     python main.py https://www.youtube.com/watch?v=VIDEO_ID
-    python main.py https://www.youtube.com/watch?v=VIDEO_ID --format mp4 --video-quality 1080p
-    python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-only --audio-format mp3
-    python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-format flac --video-quality 720p
+
+    # Video only (no separate audio file)
+    python main.py https://www.youtube.com/watch?v=VIDEO_ID --video-only
+
+    # Audio only
+    python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-only
+
+    # Custom formats
+    python main.py https://www.youtube.com/watch?v=VIDEO_ID --format mkv --video-quality 720p
+    python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-format flac
+
+    # URLs work without quotes (shell-split params are auto-rejoined)
+    python main.py https://www.youtube.com/watch?v=VIDEO_ID&t=120
 """
 
 import argparse
@@ -25,10 +38,11 @@ import sys
 DEFAULT_DOWNLOAD_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
 
 # Supported output formats with ffmpeg codec mapping
+# Default video codec for mp4 is H.265 (libx265) for better compression
 FORMAT_CONFIG = {
     "mp4": {
         "container": "mp4",
-        "video_codec": "libx264",
+        "video_codec": "libx265",
         "audio_codec": "aac",
         "extension": ".mp4",
     },
@@ -443,41 +457,63 @@ def create_parser():
     parser = argparse.ArgumentParser(
         description="Download YouTube videos using ffmpeg, convert based on audio/video config.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=True,
         epilog="""
+Default Behavior:
+  When no format options are specified, downloads TWO separate files:
+    - Video: MP4 / 1080p / H.265 (HEVC) with AAC audio
+    - Audio: MP3 / 256k
+
 Examples:
+  # Default: downloads both video (mp4-1080p-H.265) and audio (mp3-256k)
+  python main.py https://www.youtube.com/watch?v=VIDEO_ID
+
+  # Video only (skip audio file)
+  python main.py https://www.youtube.com/watch?v=VIDEO_ID --video-only
+
+  # Audio only (skip video file)
+  python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-only
+
   # Android Auto ready — video (MP4/H.264/AAC, 1080p)
   python main.py https://www.youtube.com/watch?v=VIDEO_ID --android-auto
 
   # Android Auto ready — audio only (M4A/AAC, 256k)
   python main.py https://www.youtube.com/watch?v=VIDEO_ID --android-auto --audio-only
 
-  # Download video in default MP4 format at 1080p
-  python main.py https://www.youtube.com/watch?v=VIDEO_ID
-
-  # Download video in MKV format at 720p
+  # Custom video format and quality
   python main.py https://www.youtube.com/watch?v=VIDEO_ID --format mkv --video-quality 720p
 
-  # Download audio only as MP3
-  python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-only
+  # Custom audio format
+  python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-format flac
 
-  # Download audio as high-quality FLAC
-  python main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-only --audio-format flac
+  # Use H.264 codec instead of default H.265
+  python main.py https://www.youtube.com/watch?v=VIDEO_ID --video-codec libx264
 
   # Download with custom output folder
   python main.py https://www.youtube.com/watch?v=VIDEO_ID --output /path/to/folder
+
+  # URLs work without quotes (shell-split params are auto-rejoined)
+  python main.py https://www.youtube.com/watch?v=VIDEO_ID&t=120
+  python main.py https://youtu.be/VIDEO_ID&feature=share
 
   Video formats:  mp4, mkv, webm, avi
   Audio formats:  mp3, flac, wav, aac, ogg, m4a
   Video qualities: 144p, 240p, 360p, 480p, 720p, 1080p, 1440p, 2160p, 4320p
   Audio bitrates:  64k, 128k, 192k, 256k, 320k
-
-  For Android Auto: use --android-auto for optimal MP4/H.264/AAC compatibility.
+  Video codecs:    libx264 (H.264), libx265 (H.265), libvpx-vp9 (VP9), mpeg4
         """,
     )
 
     parser.add_argument(
         "url",
-        help="YouTube video URL to download",
+        nargs="?",
+        default=None,
+        help="YouTube video URL to download (no quotes needed)",
+    )
+
+    parser.add_argument(
+        "-u", "--url-alternate",
+        help="Alternate way to specify YouTube URL (useful for unquoted URLs with special chars)",
     )
 
     parser.add_argument(
@@ -489,7 +525,7 @@ Examples:
     parser.add_argument(
         "--audio-only",
         action="store_true",
-        help="Download audio only (default: download video+audio)",
+        help="Download audio only (MP3/256k). Default downloads both video and audio.",
     )
 
     parser.add_argument(
@@ -505,7 +541,7 @@ Examples:
         "--audio-format",
         default=None,
         choices=AUDIO_FORMATS,
-        help="Audio format (default: matches container codec, or mp3 for --audio-only)",
+        help="Audio format for the separate audio file (default: mp3)",
     )
 
     parser.add_argument(
@@ -517,9 +553,22 @@ Examples:
 
     parser.add_argument(
         "--audio-bitrate",
-        default="192k",
+        default="256k",
         choices=AUDIO_BITRATES,
-        help="Audio bitrate (default: 192k)",
+        help="Audio bitrate (default: 256k)",
+    )
+
+    parser.add_argument(
+        "--video-only",
+        action="store_true",
+        help="Download only video (no audio file). By default, both video and audio are downloaded.",
+    )
+
+    parser.add_argument(
+        "--video-codec",
+        choices=["libx264", "libx265", "libvpx-vp9", "mpeg4"],
+        default=None,
+        help="Video codec (default: libx265 for mp4). Overrides format default.",
     )
 
     parser.add_argument(
@@ -544,10 +593,214 @@ Examples:
     return parser
 
 
+def resolve_args(args):
+    """Pre-process command line arguments to handle unquoted YouTube URLs.
+
+    When URLs contain '&' characters and are passed without quotes,
+    the shell splits them into separate tokens. This function detects
+    and re-joins such fragments back into a single URL.
+
+    Also handles stray trailing quotes (e.g., pasted URL with end-quote).
+
+    Examples handled:
+        python main.py https://youtu.be/abc&list=xyz --audio-only
+        -> URL is 'https://youtu.be/abc&list=xyz'
+
+        python main.py https://youtube.com/watch?v=abc&t=120 --format mp4
+        -> URL is 'https://youtube.com/watch?v=abc&t=120'
+
+        python main.py https://youtu.be/abc" --audio-only
+        -> URL is 'https://youtu.be/abc' (strips trailing quote)
+
+        python main.py https://youtube.com/shorts/abc&feature=share'
+        -> URL is 'https://youtube.com/shorts/abc&feature=share'
+    """
+    if not args:
+        return args
+
+    # Characters that count as quotes to strip
+    quote_chars = set('"\'`')
+
+    def strip_quotes(s):
+        """Remove leading and trailing quote characters from a string.
+
+        Also handles cases where a quote appears embedded near the boundary,
+        e.g., 'https://youtu.be/abc",' -> 'https://youtu.be/abc'
+        """
+        if not s:
+            return s
+        # Strip leading quote characters
+        while s and s[0] in quote_chars:
+            s = s[1:]
+        # Strip trailing quote characters
+        while s and s[-1] in quote_chars:
+            s = s[:-1]
+        # Handle embedded trailing quote: e.g., 'abc",' -> find quote, truncate there
+        # Search from the end backwards, but stop at common URL boundaries to avoid
+        # false positives on legitimate quote characters in the middle of URLs.
+        # Check up to the last '&' or '=' boundary (query param boundaries).
+        search_start = len(s) - 1
+        for pos in range(search_start, max(len(s) - 32, 0), -1):
+            if s[pos] in quote_chars:
+                s = s[:pos]
+                break
+            # Stop searching past a query-parameter boundary
+            if s[pos] in ('&', '='):
+                break
+        # Also handle embedded leading quote near start
+        for pos in range(min(5, len(s) - 1), -1, -1):
+            if s[pos] in quote_chars:
+                s = s[pos + 1:]
+                break
+        return s.strip()
+
+    def looks_like_url_start(s):
+        """Check if a string looks like the beginning of a URL."""
+        s = strip_quotes(s)
+        return s.startswith('http://') or s.startswith('https://')
+
+    def looks_like_url_fragment(s):
+        """Check if a string looks like a continuation fragment of a URL.
+
+        Matches patterns like:
+          - key=value  (query parameters: list=xyz, t=120, feature=share)
+          - /path      (path segments that got split)
+          - bare words after & (e.g., 'feature=share"' with trailing end-quote)
+        """
+        s = strip_quotes(s)
+        # Query parameter pattern: contains '=' but not a Python flag
+        if '=' in s and not s.startswith('--') and not s.startswith('-'):
+            return True
+        # Path segment pattern: starts with '/' and looks like URL path
+        if s.startswith('/') and not s.startswith('//'):
+            return True
+        # YouTube-specific fragment patterns: short alphanumeric segments that
+        # could be query params split by the shell (e.g., 'feature=share' where
+        # only 'share' remains, or 'has_verified', etc.)
+        # Only match if it's a reasonable URL-like token (no spaces, alphanumeric+safe chars)
+        if (s
+            and not s.startswith('-')
+            and ' ' not in s
+            and all(c.isalnum() or c in '_-.' for c in s)
+            and len(s) < 64):
+            return True
+        return False
+
+    result = []
+    i = 0
+    url_found = False
+
+    while i < len(args):
+        arg = args[i]
+
+        # Check if this is the start of a URL (not an option flag)
+        if not url_found and looks_like_url_start(arg):
+            # Start collecting URL fragments
+            url_parts = [strip_quotes(arg)]
+
+            # Look ahead and join consecutive URL fragments
+            j = i + 1
+            while j < len(args):
+                next_arg = args[j]
+                # Stop if we hit an option flag
+                if next_arg.startswith('-'):
+                    break
+                # Check if this looks like a URL fragment
+                if looks_like_url_fragment(strip_quotes(next_arg)):
+                    # Check if the fragment is embedded in the argument (after '&')
+                    # Shell splits at '&', so "abc&list=xyz" becomes two args
+                    cleaned = strip_quotes(next_arg)
+                    # Also handle case where fragment has trailing quotes
+                    url_parts.append(cleaned)
+                    j += 1
+                    continue
+                # If it doesn't look like a URL fragment, stop
+                break
+
+            # Join: first part is the base URL, rest are joined with '&'
+            # The first part already has the full base URL (including original query params)
+            # Additional fragments are shell-split tokens that need '&' prefix
+            if len(url_parts) == 1:
+                url = url_parts[0]
+            else:
+                # Check if the first part already ends with a query-like segment
+                # (no trailing '&') - we need to add '&' between parts
+                base = url_parts[0]
+                fragments = url_parts[1:]
+                if base and not base.endswith('&'):
+                    url = base + '&' + '&'.join(fragments)
+                else:
+                    url = base + '&'.join(fragments)
+            result.append(url)
+            url_found = True
+            i = j
+        else:
+            result.append(arg)
+            # Mark URL as found if we encounter a non-flag that's not the URL start
+            if not arg.startswith('-') and not looks_like_url_start(arg):
+                url_found = True
+            i += 1
+
+    return result
+
+
+def clean_url(url):
+    """Strip surrounding quotes and whitespace from URL.
+
+    Handles matched quotes, unmatched trailing/leading quotes,
+    and partial quoting (e.g., URL copied with a stray end-quote).
+    """
+    url = url.strip()
+    # Remove matched surrounding quotes (single, double, or backtick)
+    if (url.startswith('"') and url.endswith('"')) or \
+       (url.startswith("'") and url.endswith("'")) or \
+       (url.startswith("`") and url.endswith("`")):
+        url = url[1:-1]
+    else:
+        # Remove any stray leading quote characters
+        while url and url[0] in ('"', "'", "`"):
+            url = url[1:]
+        # Remove any stray trailing quote characters
+        while url and url[-1] in ('"', "'", "`"):
+            url = url[:-1]
+    # Remove any trailing whitespace or newlines
+    url = url.strip()
+    return url
+
+
+def verify_output(output_path, ext):
+    """Verify output file exists, renaming from alternative extension if needed."""
+    if os.path.exists(output_path):
+        return True
+
+    # Check for alternative extensions
+    for test_ext in [".mp4", ".mkv", ".webm"] + AUDIO_FORMATS:
+        actual_ext = test_ext if test_ext.startswith(".") else f".{test_ext}"
+        alt_path = output_path.replace(ext, actual_ext)
+        if os.path.exists(alt_path) and alt_path != output_path:
+            os.rename(alt_path, output_path)
+            return True
+
+    return False
+
+
 def main():
     """Main entry point."""
     parser = create_parser()
-    args = parser.parse_args()
+
+    # Pre-process args to handle unquoted URLs with special characters
+    # Join consecutive non-option tokens to handle URLs split by shell at '&'
+    processed_args = resolve_args(sys.argv[1:])
+    args = parser.parse_args(processed_args)
+
+    # Use alternate URL if provided, otherwise use positional URL
+    if args.url_alternate:
+        args.url = args.url_alternate
+    elif not args.url:
+        parser.error("No URL provided. Use positional argument or --url-alternate/-u")
+
+    # Clean the URL (remove surrounding quotes)
+    args.url = clean_url(args.url)
 
     print("=" * 60)
     print("  YouTube Downloader (ffmpeg + yt-dlp)")
@@ -592,6 +845,14 @@ def main():
             output_format = args.video_format
         preset_label = None
 
+    # Determine download modes
+    # By default (no --video-only and no --audio-only), download BOTH video and audio separately
+    download_video = not args.audio_only  # Download video unless --audio-only is set
+    download_audio = not args.video_only and not args.audio_only  # Download audio unless --video-only or --audio-only
+    if args.audio_only:
+        download_video = False
+        download_audio = True
+
     # Create output folder
     os.makedirs(args.output, exist_ok=True)
 
@@ -603,86 +864,144 @@ def main():
     print(f"  Android Auto:  {'YES' if args.android_auto else 'no'}")
     if args.android_auto:
         print(f"  Preset:        {preset_label}")
-    print(f"  Audio Only:    {args.audio_only}")
-    if not args.audio_only:
+    print(f"  Download Video: {download_video}")
+    print(f"  Download Audio: {download_audio}")
+    if download_video:
         print(f"  Video Format:  {output_format}")
         print(f"  Video Quality: {args.video_quality}")
-    print(f"  Output Format: {output_format}")
+        if args.video_codec:
+            print(f"  Video Codec:   {args.video_codec}")
+    if download_audio:
+        audio_format = args.audio_format if args.audio_format else "mp3"
+        print(f"  Audio Format:  {audio_format}")
     print(f"  Audio Bitrate: {args.audio_bitrate}")
     print(f"  Method:        {args.method}")
     print()
 
     # Extract stream info
     print("[INFO] Extracting stream URLs...")
-    stream_info = get_stream_urls(args.url, prefer_audio=args.audio_only)
+    stream_info = get_stream_urls(args.url, prefer_audio=download_audio and not download_video)
     print(f"[INFO] Title: {stream_info['title']} [{stream_info['video_id']}]")
 
-    # Build output path
-    ext = FORMAT_CONFIG[output_format]["extension"]
-    filename = f"{stream_info['title']} [{stream_info['video_id']}]{ext}"
-    output_path = os.path.join(args.output, filename)
+    # Determine video codec
+    video_codec = args.video_codec
+    if video_codec is None:
+        video_codec = FORMAT_CONFIG[output_format]["video_codec"]
 
-    print(f"[INFO] Output: {output_path}")
-    print()
+    # Track successful downloads
+    successful_downloads = []
 
-    # Download and convert
-    if args.method == "ffmpeg":
-        print("[INFO] Using ffmpeg to download streams and convert...")
-        try:
-            download_with_ffmpeg(
-                stream_info, output_path, output_format,
-                audio_bitrate=args.audio_bitrate,
-                video_quality=args.video_quality,
-                audio_only=args.audio_only,
-                apply_filter=True,
-            )
-        except Exception as e:
-            print(f"\n[WARNING] Direct ffmpeg download failed: {e}")
-            print("[INFO] Falling back to yt-dlp + ffmpeg method...")
-            print()
-            download_with_ytdlp_ffmpeg(
-                args.url, output_path, output_format,
-                audio_bitrate=args.audio_bitrate,
-                video_quality=args.video_quality,
-                audio_only=args.audio_only,
-            )
-    else:
-        download_with_ytdlp_ffmpeg(
-            args.url, output_path, output_format,
-            audio_bitrate=args.audio_bitrate,
-            video_quality=args.video_quality,
-            audio_only=args.audio_only,
-        )
-
-    # Verify output
-    if os.path.exists(output_path):
-        size = os.path.getsize(output_path)
-        size_mb = size / (1024 * 1024)
+    # Download VIDEO (mp4-1080p-H.265 by default)
+    if download_video:
         print()
-        print("=" * 60)
-        print(f"[SUCCESS] Saved: {output_path}")
-        print(f"[INFO]  File size: {size_mb:.2f} MB")
-        print("=" * 60)
-    else:
-        # Check for alternative extensions
-        found = False
-        for test_ext in [".mp4", ".mkv", ".webm"] + AUDIO_FORMATS:
-            alt_path = output_path.replace(ext, f".{test_ext}" if not test_ext.startswith(".") else test_ext)
-            if os.path.exists(alt_path) and alt_path != output_path:
-                os.rename(alt_path, output_path)
-                size = os.path.getsize(output_path)
-                size_mb = size / (1024 * 1024)
-                print()
-                print("=" * 60)
-                print(f"[SUCCESS] Saved: {output_path}")
-                print(f"[INFO]  File size: {size_mb:.2f} MB")
-                print("=" * 60)
-                found = True
-                break
+        print("--- Downloading Video ---")
+        video_ext = FORMAT_CONFIG[output_format]["extension"]
+        video_filename = f"{stream_info['title']} [{stream_info['video_id']}][video]{video_ext}"
+        video_output_path = os.path.join(args.output, video_filename)
 
-        if not found:
-            print(f"\n[ERROR] Output file not found at: {output_path}")
-            sys.exit(1)
+        print(f"[INFO] Output: {video_output_path}")
+        print()
+
+        # Temporarily override video codec for this download
+        original_codec = FORMAT_CONFIG[output_format]["video_codec"]
+        FORMAT_CONFIG[output_format]["video_codec"] = video_codec
+
+        if args.method == "ffmpeg":
+            print("[INFO] Using ffmpeg to download video streams and convert...")
+            try:
+                download_with_ffmpeg(
+                    stream_info, video_output_path, output_format,
+                    audio_bitrate=args.audio_bitrate,
+                    video_quality=args.video_quality,
+                    audio_only=False,
+                    apply_filter=True,
+                )
+            except Exception as e:
+                print(f"\n[WARNING] Direct ffmpeg download failed: {e}")
+                print("[INFO] Falling back to yt-dlp + ffmpeg method...")
+                print()
+                download_with_ytdlp_ffmpeg(
+                    args.url, video_output_path, output_format,
+                    audio_bitrate=args.audio_bitrate,
+                    video_quality=args.video_quality,
+                    audio_only=False,
+                )
+        else:
+            download_with_ytdlp_ffmpeg(
+                args.url, video_output_path, output_format,
+                audio_bitrate=args.audio_bitrate,
+                video_quality=args.video_quality,
+                audio_only=False,
+            )
+
+        # Restore original codec
+        FORMAT_CONFIG[output_format]["video_codec"] = original_codec
+
+        # Verify video output
+        if verify_output(video_output_path, video_ext):
+            successful_downloads.append(video_output_path)
+
+    # Download AUDIO (mp3-256k by default)
+    if download_audio:
+        print()
+        print("--- Downloading Audio ---")
+        audio_format = args.audio_format if args.audio_format else "mp3"
+        audio_ext = FORMAT_CONFIG[audio_format]["extension"]
+        audio_filename = f"{stream_info['title']} [{stream_info['video_id']}][audio]{audio_ext}"
+        audio_output_path = os.path.join(args.output, audio_filename)
+
+        print(f"[INFO] Output: {audio_output_path}")
+        print()
+
+        # Re-extract stream info for audio (may need different streams)
+        if download_video:
+            stream_info = get_stream_urls(args.url, prefer_audio=True)
+
+        if args.method == "ffmpeg":
+            print("[INFO] Using ffmpeg to download audio stream and convert...")
+            try:
+                download_with_ffmpeg(
+                    stream_info, audio_output_path, audio_format,
+                    audio_bitrate=args.audio_bitrate,
+                    video_quality=args.video_quality,
+                    audio_only=True,
+                    apply_filter=False,
+                )
+            except Exception as e:
+                print(f"\n[WARNING] Direct ffmpeg download failed: {e}")
+                print("[INFO] Falling back to yt-dlp + ffmpeg method...")
+                print()
+                download_with_ytdlp_ffmpeg(
+                    args.url, audio_output_path, audio_format,
+                    audio_bitrate=args.audio_bitrate,
+                    video_quality=args.video_quality,
+                    audio_only=True,
+                )
+        else:
+            download_with_ytdlp_ffmpeg(
+                args.url, audio_output_path, audio_format,
+                audio_bitrate=args.audio_bitrate,
+                video_quality=args.video_quality,
+                audio_only=True,
+            )
+
+        # Verify audio output
+        if verify_output(audio_output_path, audio_ext):
+            successful_downloads.append(audio_output_path)
+
+    # Final summary
+    print()
+    print("=" * 60)
+    if successful_downloads:
+        for path in successful_downloads:
+            size = os.path.getsize(path)
+            size_mb = size / (1024 * 1024)
+            print(f"[SUCCESS] Saved: {path}")
+            print(f"[INFO]  File size: {size_mb:.2f} MB")
+    else:
+        print("[ERROR] No files were successfully downloaded.")
+        sys.exit(1)
+    print("=" * 60)
 
 
 if __name__ == "__main__":

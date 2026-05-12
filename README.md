@@ -7,6 +7,7 @@ A Python-based YouTube downloader and Telegram bot that converts videos/audio to
 ## ✨ Features
 
 - **CLI Downloader** — Download YouTube videos/audio with configurable format, quality, and bitrate using `ffmpeg`
+- **Playlist Download** — Download entire YouTube playlists with a single command (CLI + Bot)
 - **Telegram Bot** — Send YouTube links from any device, receive converted files back via Telegram
 - **Android Auto Optimized** — `--android-auto` flag for MP4/H.264+AAC (video) or M4A/AAC (audio) formats
 - **Multiple Formats** — MP4, MKV, WebM, AVI for video; MP3, FLAC, M4A, AAC, OGG for audio
@@ -51,6 +52,12 @@ python3 main.py https://www.youtube.com/watch?v=VIDEO_ID --audio-only --audio-fo
 
 # Custom format and quality
 python3 main.py https://www.youtube.com/watch?v=VIDEO_ID --format mkv --video-quality 720p
+
+# Download entire playlist (auto-detected)
+python3 main.py https://www.youtube.com/playlist?list=PLAYLIST_ID
+
+# Download playlist as audio only
+python3 main.py https://www.youtube.com/playlist?list=PLAYLIST_ID --audio-only --audio-format m4a
 ```
 
 ### 3. Telegram Bot Setup
@@ -77,10 +84,12 @@ Send these commands to your bot from any device:
 | `/quality 720p` | Set video quality (360p–2160p) |
 | `/bitrate 320k` | Set audio bitrate (128k–320k) |
 | `/format mp3` | Set output format |
+| `/playlist` | Set mode to playlist download |
 | `/settings` | Show current settings |
 | `/help` | Show all commands |
 
 **Or just paste a YouTube link** and the bot will download using your last-used mode.
+**Playlist URLs are auto-detected** — send a playlist URL and all videos will be downloaded and sent individually.
 
 ## ⚙️ Configuration
 
@@ -100,6 +109,7 @@ Send these commands to your bot from any device:
 | `--audio-format` | mp3, flac, m4a, aac, ogg | m4a | Audio output format |
 | `--audio-bitrate` | 64k–320k | 192k | Audio bitrate |
 | `--audio-only` | — | — | Download audio only |
+| `--playlist` | — | — | Download entire playlist (auto-detected) |
 | `--android-auto` | — | — | Optimize for Android Auto |
 | `--output`, `-o` | any path | ~/Downloads | Output folder |
 
@@ -139,3 +149,9 @@ A: Yes, just install ffmpeg and Python dependencies on the VPS.
 
 **Q: Why MP4/H.264 for Android Auto?**
 A: Most Android head units natively support H.264/AAC in MP4 containers. Formats like VP9, HEVC, MKV, and WebM are often unsupported.
+
+**Q: Can I download an entire YouTube playlist?**
+A: Yes! Send a playlist URL to the bot (auto-detected) or use `--playlist` flag in CLI. Each video is downloaded and sent individually via Telegram.
+
+**Q: What happens if a video in the playlist fails to download?**
+A: The bot continues downloading the rest of the playlist and shows a summary of successful/failed downloads at the end.
