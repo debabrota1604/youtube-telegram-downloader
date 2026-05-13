@@ -110,6 +110,77 @@ DOWNLOADER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ma
 # Temp directory for downloads (temp/{timestamp} per request)
 TEMP_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
 
+# Log directory
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+
+
+def setup_logging():
+    """Setup file-based logging: main bot log + per-user logs."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+    # --- Main bot logger (system events, errors, downloads) ---
+    main_log = os.path.join(LOG_DIR, "bot.log")
+    main_handler = logging.FileHandler(main_log, encoding="utf-8")
+    main_handler.setLevel(logging.INFO)
+    main_handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(levelname)-5s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+
+    # --- Console handler ---
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(message)s",
+        datefmt="%H:%M:%S",
+    ))
+
+    # --- Root logger ---
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(main_handler)
+    root_logger.addHandler(console_handler)
+
+    return root_logger
+
+
+def get_user_logger(user_id):
+    """Get (or create) a logger that writes to a per-user log file."""
+    logger_name = f"user_{user_id}"
+    logger = logging.getLogger(logger_name)
+
+    if not logger.handlers:
+        user_log = os.path.join(LOG_DIR, f"user_{user_id}.log")
+        handler = logging.FileHandler(user_log, encoding="utf-8")
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter(
+            "[%(asctime)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        # Prevent propagation to root logger (avoid duplicate entries in bot.log)
+        logger.propagate = False
+
+    return logger
+
+
+def log_user_activity(user_id, action, request_text="", response_text=""):
+    """Log a user's request and the bot's response."""
+    logger = get_user_logger(user_id)
+    entry = f"ACTION: {action}"
+    if request_text:
+        # Truncate long requests (e.g. URLs with many params)
+        req = request_text[:200]
+        entry += f" | REQUEST: {req}"
+    if response_text:
+        resp = response_text[:300]
+        entry += f" | RESPONSE: {resp}"
+    logger.info(entry)
+
+    # Also log to main bot log
+    logging.info(f"[User @{user_id}] {action}: {request_text[:100]}")
+
 
 # ─── Custom Exception ────────────────────────────────────────────────────────
 
@@ -728,8 +799,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not is_authorized(user_id):
+        log_user_activity(user_id, "/start", response_text="❌ Not authorized")
         await update.message.reply_text("❌ You are not authorized to use this bot.")
         return
+
+    log_user_activity(user_id, "/start", response_text="Welcome message sent")
 
     name = update.effective_user.first_name
     keyboard = [
@@ -760,6 +834,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
+    user_id = update.effective_user.id
+    log_user_activity(user_id, "/help", response_text="Help message sent")
     help_text = (
         "📱 <b>YouTube Downloader Bot</b>\n\n"
         "<b>Quick Use:</b> Just paste a YouTube link!\n"
@@ -796,8 +872,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set mode to video."""
-    settings = get_user_settings(update.effective_user.id)
+    user_id = update.effective_user.id
+    settings = get_user_settings(user_id)
     settings["mode"] = "video"
+    log_user_activity(user_id, "/video", response_text="Mode set to video")
     await update.message.reply_text(
         "🎬 Mode set to <b>Video</b>\n"
         f"Format: {settings['video_format']} | Quality: {settings['video_quality']}\n\n"
@@ -808,8 +886,10 @@ async def cmd_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set mode to audio."""
-    settings = get_user_settings(update.effective_user.id)
+    user_id = update.effective_user.id
+    settings = get_user_settings(user_id)
     settings["mode"] = "audio"
+    log_user_activity(user_id, "/audio", response_text="Mode set to audio")
     await update.message.reply_text(
         "🎵 Mode set to <b>Audio Only</b>\n"
         f"Format: {settings['audio_format']} | Bitrate: {settings['audio_bitrate']}\n\n"
@@ -820,9 +900,11 @@ async def cmd_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set mode to playlist."""
-    settings = get_user_settings(update.effective_user.id)
+    user_id = update.effective_user.id
+    settings = get_user_settings(user_id)
     settings["_playlist_submode"] = settings["mode"]
     settings["mode"] = "playlist"
+    log_user_activity(user_id, "/playlist", response_text="Mode set to playlist")
     submode_label = "🎵 Audio" if settings["_playlist_submode"] == "audio" else "🎬 Video"
     await update.message.reply_text(
         f"📺 Mode set to <b>Playlist Download</b> ({submode_label})\n\n"
@@ -835,7 +917,9 @@ async def cmd_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show current settings."""
-    settings = get_user_settings(update.effective_user.id)
+    user_id = update.effective_user.id
+    settings = get_user_settings(user_id)
+    log_user_activity(user_id, "/settings", response_text="Settings shown")
     text = (
         "⚙️ <b>Current Settings</b>\n\n"
         f"Mode: <b>{'🎬 Video' if settings['mode'] == 'video' else '🎵 Audio' if settings['mode'] == 'audio' else '📺 Playlist'}</b>\n"
@@ -856,48 +940,59 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set video quality."""
+    user_id = update.effective_user.id
     if not context.args:
+        log_user_activity(user_id, "/quality", response_text="Missing argument")
         await update.message.reply_text("Usage: <code>/quality 720p</code>", parse_mode="HTML")
         return
     quality = context.args[0].lower()
     valid = ["360p", "480p", "720p", "1080p", "1440p", "2160p"]
     if quality not in valid:
+        log_user_activity(user_id, "/quality", request_text=quality, response_text="Invalid quality")
         await update.message.reply_text(
             f"Invalid quality. Choose from: {', '.join(valid)}"
         )
         return
-    settings = get_user_settings(update.effective_user.id)
+    settings = get_user_settings(user_id)
     settings["video_quality"] = quality
+    log_user_activity(user_id, "/quality", request_text=quality, response_text="Quality updated")
     await update.message.reply_text(f"✅ Video quality set to <b>{quality}</b>", parse_mode="HTML")
 
 
 async def cmd_bitrate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set audio bitrate."""
+    user_id = update.effective_user.id
     if not context.args:
+        log_user_activity(user_id, "/bitrate", response_text="Missing argument")
         await update.message.reply_text("Usage: <code>/bitrate 256k</code>", parse_mode="HTML")
         return
     bitrate = context.args[0].lower()
     valid = ["128k", "192k", "256k", "320k"]
     if bitrate not in valid:
+        log_user_activity(user_id, "/bitrate", request_text=bitrate, response_text="Invalid bitrate")
         await update.message.reply_text(
             f"Invalid bitrate. Choose from: {', '.join(valid)}"
         )
         return
-    settings = get_user_settings(update.effective_user.id)
+    settings = get_user_settings(user_id)
     settings["audio_bitrate"] = bitrate
+    log_user_activity(user_id, "/bitrate", request_text=bitrate, response_text="Bitrate updated")
     await update.message.reply_text(f"✅ Audio bitrate set to <b>{bitrate}</b>", parse_mode="HTML")
 
 
 async def cmd_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set output format."""
+    user_id = update.effective_user.id
     if not context.args:
+        log_user_activity(user_id, "/format", response_text="Missing argument")
         await update.message.reply_text("Usage: <code>/format mp4</code>", parse_mode="HTML")
         return
     fmt = context.args[0].lower()
-    settings = get_user_settings(update.effective_user.id)
+    settings = get_user_settings(user_id)
     if settings["mode"] == "video":
         valid = ["mp4", "mkv", "webm"]
         if fmt not in valid:
+            log_user_activity(user_id, "/format", request_text=fmt, response_text="Invalid video format")
             await update.message.reply_text(
                 f"Invalid video format. Choose from: {', '.join(valid)}"
             )
@@ -906,17 +1001,20 @@ async def cmd_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         valid = ["m4a", "mp3", "flac", "aac", "ogg"]
         if fmt not in valid:
+            log_user_activity(user_id, "/format", request_text=fmt, response_text="Invalid audio format")
             await update.message.reply_text(
                 f"Invalid audio format. Choose from: {', '.join(valid)}"
             )
             return
         settings["audio_format"] = fmt
+    log_user_activity(user_id, "/format", request_text=fmt, response_text="Format updated")
     await update.message.reply_text(f"✅ Format set to <b>{fmt}</b>", parse_mode="HTML")
 
 
 async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the download queue."""
     user_id = update.effective_user.id
+    log_user_activity(user_id, "/queue", response_text="Queue shown")
     queue = get_queue(user_id)
 
     if not queue:
@@ -950,6 +1048,7 @@ async def cmd_queue_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear the download queue."""
     user_id = update.effective_user.id
     count = clear_queue(user_id)
+    log_user_activity(user_id, "/queue-clear", response_text=f"Queue cleared ({count} items)")
     await update.message.reply_text(
         f"🗑️ Queue cleared ({count} item{'s' if count != 1 else ''} removed)."
     )
@@ -961,22 +1060,27 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task_id = IS_DOWNLOADING.get(user_id)
 
     if not task_id:
+        log_user_activity(user_id, "/cancel", response_text="No active download")
         await update.message.reply_text("⚡ No active download to cancel.")
         return
 
     task = DOWNLOAD_TASKS.get(task_id)
     if not task:
+        log_user_activity(user_id, "/cancel", response_text="No active download")
         await update.message.reply_text("⚡ No active download to cancel.")
         IS_DOWNLOADING.pop(user_id, None)
         return
 
     task["cancelled"] = True
+    log_user_activity(user_id, "/cancel", response_text="Cancellation initiated")
     await update.message.reply_text("🛑 Cancellation initiated. Please wait...")
 
 
 async def cmd_clear_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Clear all temporary download files."""
+    user_id = update.effective_user.id
     count = clear_temp_dir()
+    log_user_activity(user_id, "/clear-cache", response_text=f"Cache cleared ({count} folders)")
     if count > 0:
         await update.message.reply_text(
             f"🗑️ Cache cleared ({count} temp folder{'s' if count != 1 else ''} removed)."
@@ -1433,13 +1537,15 @@ async def drain_queue(user_id, context):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle YouTube link messages."""
     user_id = update.effective_user.id
+    text = update.message.text
 
     if not is_authorized(user_id):
+        log_user_activity(user_id, "message", request_text=text, response_text="❌ Not authorized")
         await update.message.reply_text("❌ You are not authorized to use this bot.")
         return
 
-    text = update.message.text
     if not is_youtube_link(text):
+        log_user_activity(user_id, "message", request_text=text, response_text="Invalid YouTube link")
         await update.message.reply_text(
             "🔗 Please send a valid YouTube link.\n"
             "Examples:\n"
@@ -1453,6 +1559,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = extract_youtube_link(text)
     chat_id = update.effective_chat.id
     settings = get_user_settings(user_id)
+
+    # Log the download request
+    log_user_activity(user_id, "download_request", request_text=url,
+                      response_text=f"Mode: {settings['mode']}")
 
     # Check if already downloading - add to queue
     if IS_DOWNLOADING.get(user_id):
@@ -1891,13 +2001,11 @@ def check_dependencies():
 
 def main():
     """Bot entry point."""
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    logger = logging.getLogger(__name__)
+    # Setup file-based logging
+    setup_logging()
+    logging.info("=" * 50)
+    logging.info("YouTube Telegram Bot starting...")
+    logging.info("=" * 50)
 
     print("=" * 50)
     print("  YouTube Telegram Bot")
@@ -1920,7 +2028,10 @@ def main():
     else:
         print("[BOT] Open to all users")
     print(f"[BOT] Downloader: {DOWNLOADER_SCRIPT}")
+    print(f"[BOT] Logs: {LOG_DIR}/")
     print("\n[BOT] Starting bot... Press Ctrl+C to stop.\n")
+
+    logging.info(f"Bot token configured, restricted={bool(ALLOWED_USERS)}")
 
     # Build and run bot
     app = Application.builder().token(BOT_TOKEN).build()
