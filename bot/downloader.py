@@ -483,7 +483,6 @@ async def download_and_send(context, user_id, chat_id, url, settings,
                     filename=file_name,
                     title=send_title,
                     performer=send_performer,
-                    timeout=600,
                 )
             else:
                 await context.bot.send_video(
@@ -491,7 +490,6 @@ async def download_and_send(context, user_id, chat_id, url, settings,
                     video=f,
                     filename=file_name,
                     supports_streaming=True,
-                    timeout=600,
                 )
 
         # Phase 6: Done

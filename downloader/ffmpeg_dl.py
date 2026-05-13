@@ -126,20 +126,48 @@ def download_with_ffmpeg(stream_info, output_path, format_name, audio_bitrate="1
 
 
 def download_with_ytdlp_ffmpeg(url, output_path, format_name, audio_bitrate="192k",
-                               video_quality="1080p", audio_only=False):
-    """Fallback: Use yt-dlp with ffmpeg as the external converter/downloader."""
+                               video_quality="1080p", audio_only=False, video_codec=None):
+    """Use yt-dlp with ffmpeg as the external converter/downloader."""
     from downloader.config import VIDEO_FORMATS
 
     fmt_config = FORMAT_CONFIG[format_name]
+    if video_codec is None:
+        video_codec = fmt_config.get("video_codec", "libx264")
 
     if audio_only:
         ytdlp_format = "bestaudio"
     else:
         max_height = get_quality_filter_arg(video_quality)
-        ytdlp_format = f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
+        # Prefer video streams that are native to the target container to avoid
+        # codec-incompatible files (e.g. VP9/AV1 inside MP4 which many players
+        # cannot play). Fall back to any bestvideo + re-encode if needed.
+        if format_name == "mp4":
+            ytdlp_format = (
+                f"bestvideo[ext=mp4][height<={max_height}]+bestaudio[ext=m4a]/"
+                f"bestvideo[ext=mp4][height<={max_height}]+bestaudio/"
+                f"best[height<={max_height}]/best"
+            )
+        elif format_name == "webm":
+            ytdlp_format = (
+                f"bestvideo[ext=webm][height<={max_height}]+bestaudio[ext=webm]/"
+                f"bestvideo[ext=webm][height<={max_height}]+bestaudio/"
+                f"best[height<={max_height}]/best"
+            )
+        elif format_name == "mkv":
+            ytdlp_format = (
+                f"bestvideo[ext=webm][height<={max_height}]+bestaudio[ext=webm]/"
+                f"bestvideo[ext=mkv][height<={max_height}]+bestaudio/"
+                f"best[height<={max_height}]/best"
+            )
+        else:
+            ytdlp_format = f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
 
-    base_name = os.path.splitext(output_path)[0]
-    output_template = base_name + "%(ext)s"
+    # Use output_path directly as the template - no %(ext)s substitution needed
+    # since we already know the exact target extension we want.
+    # Using %(ext)s caused issues where yt-dlp would produce filenames like
+    # "[video]mp4.mp4" instead of "[video].mp4" because %(ext)s is replaced
+    # with the extension without a dot.
+    output_template = output_path
 
     cmd = [
         "yt-dlp",
@@ -168,7 +196,7 @@ def download_with_ytdlp_ffmpeg(url, output_path, format_name, audio_bitrate="192
         print(f"\n[ERROR] Download failed with return code {process.returncode}")
         sys.exit(1)
 
-    candidates = glob.glob(base_name + ".*")
+    candidates = glob.glob(output_path + ".*")
     actual_file = None
     for c in candidates:
         if os.path.isfile(c) and os.path.getsize(c) > 0:

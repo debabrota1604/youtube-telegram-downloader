@@ -68,6 +68,7 @@ def download_single(url, output_folder, output_format, video_quality="1080p",
                     audio_bitrate=audio_bitrate,
                     video_quality=video_quality,
                     audio_only=False,
+                    video_codec=video_codec,
                 )
         else:
             download_with_ytdlp_ffmpeg(
@@ -75,6 +76,7 @@ def download_single(url, output_folder, output_format, video_quality="1080p",
                 audio_bitrate=audio_bitrate,
                 video_quality=video_quality,
                 audio_only=False,
+                video_codec=video_codec,
             )
 
         # Restore original codec

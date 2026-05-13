@@ -2,7 +2,10 @@
 
 import argparse
 import os
+import shutil
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from downloader.config import (
     ANDROID_AUTO_PRESETS,
@@ -153,8 +156,8 @@ Examples:
     parser.add_argument(
         "--method",
         choices=["ffmpeg", "ytdlp"],
-        default="ffmpeg",
-        help="Download method: ffmpeg (direct) or ytdlp (fallback). Default: ffmpeg",
+        default="ytdlp",
+        help="Download method: ytdlp (robust, recommended) or ffmpeg (direct). Default: ytdlp",
     )
 
     parser.add_argument(
@@ -164,6 +167,31 @@ Examples:
     )
 
     return parser
+
+
+def _get_temp_dir():
+    """Create a timestamped temp directory inside project temp/ folder."""
+    _project_root = Path(__file__).resolve().parent.parent
+    temp_base = _project_root / "temp"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmpdir = temp_base / timestamp
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    return str(tmpdir)
+
+
+def _move_files_to_output(temp_dir, output_folder):
+    """Move all downloaded files from temp_dir to the final output_folder."""
+    os.makedirs(output_folder, exist_ok=True)
+    moved = 0
+    for fname in os.listdir(temp_dir):
+        src = os.path.join(temp_dir, fname)
+        if os.path.isfile(src):
+            dst = os.path.join(output_folder, fname)
+            shutil.move(src, dst)
+            size_mb = os.path.getsize(dst) / (1024 * 1024)
+            print(f"[MOVED] {fname} ({size_mb:.2f} MB) -> {output_folder}")
+            moved += 1
+    return moved
 
 
 def main():
@@ -232,14 +260,15 @@ def main():
         download_video = False
         download_audio = True
 
-    # Create output folder
-    os.makedirs(args.output, exist_ok=True)
+    # Create temp directory for intermediate files
+    temp_dir = _get_temp_dir()
 
     # Print configuration
     print()
     print("[CONFIG]")
     print(f"  URL:           {args.url}")
     print(f"  Output Folder: {args.output}")
+    print(f"  Temp Dir:      {temp_dir}")
     print(f"  Android Auto:  {'YES' if args.android_auto else 'no'}")
     if args.android_auto:
         print(f"  Preset:        {preset_label}")
@@ -258,34 +287,46 @@ def main():
     print(f"  Playlist:      {'YES' if args.playlist else 'no'}")
     print()
 
-    # Handle playlist mode
-    if args.playlist:
-        download_playlist(
-            args.url, args.output,
-            video_format=output_format,
-            video_quality=args.video_quality,
-            audio_bitrate=args.audio_bitrate,
-            audio_format=args.audio_format if args.audio_format else "mp3",
-            audio_only=args.audio_only,
-            video_only=args.video_only,
-            method=args.method,
-            video_codec=args.video_codec,
-        )
-        return
+    try:
+        # Handle playlist mode
+        if args.playlist:
+            download_playlist(
+                args.url, temp_dir,
+                video_format=output_format,
+                video_quality=args.video_quality,
+                audio_bitrate=args.audio_bitrate,
+                audio_format=args.audio_format if args.audio_format else "mp3",
+                audio_only=args.audio_only,
+                video_only=args.video_only,
+                method=args.method,
+                video_codec=args.video_codec,
+            )
+        else:
+            # Download single video
+            download_single(
+                url=args.url,
+                output_folder=temp_dir,
+                output_format=output_format,
+                video_quality=args.video_quality,
+                audio_bitrate=args.audio_bitrate,
+                audio_format=args.audio_format if args.audio_format else "mp3",
+                audio_only=args.audio_only,
+                video_only=args.video_only,
+                method=args.method,
+                video_codec=args.video_codec,
+            )
 
-    # Download single video
-    download_single(
-        url=args.url,
-        output_folder=args.output,
-        output_format=output_format,
-        video_quality=args.video_quality,
-        audio_bitrate=args.audio_bitrate,
-        audio_format=args.audio_format if args.audio_format else "mp3",
-        audio_only=args.audio_only,
-        video_only=args.video_only,
-        method=args.method,
-        video_codec=args.video_codec,
-    )
+        # Move downloaded files to final output folder
+        print()
+        print("--- Moving files to output folder ---")
+        moved = _move_files_to_output(temp_dir, args.output)
+        print(f"[INFO] Moved {moved} file(s) to {args.output}")
+
+    finally:
+        # Cleanup temp directory
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            print(f"[INFO] Cleaned up temp directory: {temp_dir}")
 
 
 if __name__ == "__main__":

@@ -79,6 +79,7 @@ def download_playlist(url, output_folder, video_format="mp4", video_quality="108
                                 audio_bitrate=audio_bitrate,
                                 video_quality=video_quality,
                                 audio_only=False,
+                                video_codec=vc,
                             )
                         except (Exception, SystemExit):
                             pass
@@ -89,6 +90,7 @@ def download_playlist(url, output_folder, video_format="mp4", video_quality="108
                             audio_bitrate=audio_bitrate,
                             video_quality=video_quality,
                             audio_only=False,
+                            video_codec=vc,
                         )
                     except (Exception, SystemExit):
                         pass

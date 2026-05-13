@@ -254,7 +254,6 @@ async def handle_playlist_message(update, context, url, settings):
                             audio=f,
                             filename=file_name,
                             caption=f"🎵 {file_name} ({idx + 1}/{len(files)})",
-                            timeout=600,
                         )
                     else:
                         await context.bot.send_video(
@@ -263,7 +262,6 @@ async def handle_playlist_message(update, context, url, settings):
                             filename=file_name,
                             supports_streaming=True,
                             caption=f"🎬 {file_name} ({idx + 1}/{len(files)})",
-                            timeout=600,
                         )
                 sent_count += 1
             except Exception:
